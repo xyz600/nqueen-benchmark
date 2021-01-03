@@ -84,3 +84,22 @@ result count: 2279184, elapsed = 366[ms]
 result count: 14772512, elapsed = 2155[ms]
 result count: 95815104, elapsed = 18434[ms]
 ```
+
+### ver5
+
+探索の初手重複除去  
+
+結果(N = 8 to 17)
+
+```
+result count: 92, elapsed = 12[ms]
+result count: 352, elapsed = 8[ms]
+result count: 724, elapsed = 3[ms]
+result count: 2680, elapsed = 0[ms]
+result count: 14200, elapsed = 0[ms]
+result count: 73712, elapsed = 5[ms]
+result count: 365596, elapsed = 29[ms]
+result count: 2279184, elapsed = 202[ms]
+result count: 14772512, elapsed = 1039[ms]
+result count: 95815104, elapsed = 10245[ms]
+```

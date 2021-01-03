@@ -4,6 +4,7 @@
 #include <immintrin.h>
 #include <iostream>
 #include <numeric>
+#include <tuple>
 #include <vector>
 
 struct State
@@ -76,19 +77,35 @@ std::uint64_t solve(State& state, const std::size_t n)
 
 std::uint64_t cpu_solve(const std::size_t n)
 {
-    std::vector<std::size_t> counter(n * n, 0);
+    std::vector<std::tuple<int, int, int>> c1c2;
+    const std::size_t col1_max = n / 2 + (n % 2 == 0 ? 0 : 1);
+    for (std::size_t col1 = 0; col1 < col1_max; col1++)
+    {
+        for (std::size_t col2 = 0; col2 < n; col2++)
+        {
+            if (n % 2 == 0)
+            {
+                c1c2.emplace_back(col1, col2, 2);
+            }
+            else
+            {
+                c1c2.emplace_back(col1, col2, col1 == col1_max - 1 ? 1 : 2);
+            }
+        }
+    }
+    std::vector<std::size_t> counter(c1c2.size(), 0);
 #pragma omp parallel for
-    for (std::size_t i = 0; i < n * n; i++)
+    for (std::size_t i = 0; i < c1c2.size(); i++)
     {
         State state;
         state.clear();
-        const std::size_t column1 = i / n;
+        const auto [column1, column2, rate] = c1c2[i];
+
         state.column_bitmap |= 1u << column1;
         state.upper_left_bitmap |= 1ull << (n - 1 + column1);
         state.upper_right_bitmap |= 1ull << column1;
         state.row += 1;
 
-        const std::size_t column2 = i % n;
         const std::uint32_t column_bit = 1u << column2;
         const std::uint64_t upper_left_bit = 1ull << (n - 1 - state.row + column2);
         const std::uint64_t upper_right_bit = 1ull << (state.row + column2);
@@ -98,7 +115,7 @@ std::uint64_t cpu_solve(const std::size_t n)
             state.upper_left_bitmap |= upper_left_bit;
             state.upper_right_bitmap |= upper_right_bit;
             state.row++;
-            counter[i] = solve(state, n);
+            counter[i] = solve(state, n) * rate;
         }
     }
     return std::accumulate(counter.begin(), counter.end(), 0);

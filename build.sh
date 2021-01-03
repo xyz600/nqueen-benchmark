@@ -1,1 +1,1 @@
-g++ -std=c++17 -Ofast -march=native -fopenmp main.cpp
+/usr/bin/g++ -std=c++17 -Ofast -march=native -fopenmp main.cpp
