@@ -51,17 +51,30 @@ std::uint64_t solve(State& state, const std::size_t n)
 
 std::uint64_t cpu_solve(const std::size_t n)
 {
-    std::vector<std::size_t> counter(n, 0);
+    std::vector<std::size_t> counter(n * n, 0);
 #pragma omp parallel for
-    for (std::size_t column = 0; column < n; column++)
+    for (std::size_t i = 0; i < n * n; i++)
     {
         State state;
         state.clear();
-        state.column_bitmap |= 1u << column;
-        state.upper_left_bitmap |= 1ull << (n - 1 + column);
-        state.upper_right_bitmap |= 1ull << column;
-        state.row++;
-        counter[column] = solve(state, n);
+        const std::size_t column1 = i / n;
+        state.column_bitmap |= 1u << column1;
+        state.upper_left_bitmap |= 1ull << (n - 1 + column1);
+        state.upper_right_bitmap |= 1ull << column1;
+        state.row += 1;
+
+        const std::size_t column2 = i % n;
+        const std::uint32_t column_bit = 1u << column2;
+        const std::uint64_t upper_left_bit = 1ull << (n - 1 - state.row + column2);
+        const std::uint64_t upper_right_bit = 1ull << (state.row + column2);
+        if (((state.column_bitmap & column_bit) == 0u) && ((state.upper_left_bitmap & upper_left_bit) == 0ull) && ((state.upper_right_bitmap & upper_right_bit) == 0ull))
+        {
+            state.column_bitmap |= column_bit;
+            state.upper_left_bitmap |= upper_left_bit;
+            state.upper_right_bitmap |= upper_right_bit;
+            state.row++;
+            counter[i] = solve(state, n);
+        }
     }
     return std::accumulate(counter.begin(), counter.end(), 0);
 }

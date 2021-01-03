@@ -46,3 +46,23 @@ result count: 2279184, elapsed = 689[ms]
 result count: 14772512, elapsed = 4405[ms]
 result count: 95815104, elapsed = 29532[ms]
 ```
+
+### ver3
+
+深さ2まで展開して、並列度を調整  
+
+結果(N = 8 to 17)
+
+```
+result count: 92, elapsed = 8[ms]
+result count: 352, elapsed = 0[ms]
+result count: 724, elapsed = 0[ms]
+result count: 2680, elapsed = 0[ms]
+result count: 14200, elapsed = 4[ms]
+result count: 73712, elapsed = 21[ms]
+result count: 365596, elapsed = 80[ms]
+result count: 2279184, elapsed = 557[ms]
+result count: 14772512, elapsed = 3686[ms]
+result count: 95815104, elapsed = 24117[ms]
+```
+
