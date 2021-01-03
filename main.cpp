@@ -42,10 +42,10 @@ std::uint64_t solve(State& state, const std::size_t n)
         const auto upper_left_bit = _mm256_slli_epi64(mult_offset, n - 1 - state.row + base_column);
         const auto upper_right_bit = _mm256_slli_epi64(mult_offset, state.row + base_column);
 
-        const auto mask1 = _mm256_cmpeq_epi64(_mm256_and_si256(column_bit, column_bitmap), zeros);
-        const auto mask2 = _mm256_cmpeq_epi64(_mm256_and_si256(upper_left_bit, upper_left_bitmap), zeros);
-        const auto mask3 = _mm256_cmpeq_epi64(_mm256_and_si256(upper_right_bit, upper_right_bitmap), zeros);
-        const auto all_mask = _mm256_and_si256(_mm256_and_si256(mask1, mask2), mask3);
+        const auto mask1 = _mm256_and_si256(column_bit, column_bitmap);
+        const auto mask2 = _mm256_and_si256(upper_left_bit, upper_left_bitmap);
+        const auto mask3 = _mm256_and_si256(upper_right_bit, upper_right_bitmap);
+        const auto all_mask = _mm256_cmpeq_epi64(zeros, _mm256_or_si256(_mm256_or_si256(mask1, mask2), mask3));
 
         std::uint32_t bitmask = _mm256_movemask_epi8(all_mask) & 0x80808080u;
         while (bitmask > 0)
