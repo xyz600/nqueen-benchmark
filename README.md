@@ -66,3 +66,21 @@ result count: 14772512, elapsed = 3686[ms]
 result count: 95815104, elapsed = 24117[ms]
 ```
 
+### ver4
+
+最内ループを SIMD 4並列
+
+結果(N = 8 to 17)
+
+```
+result count: 92, elapsed = 3[ms]
+result count: 352, elapsed = 13[ms]
+result count: 724, elapsed = 2[ms]
+result count: 2680, elapsed = 4[ms]
+result count: 14200, elapsed = 1[ms]
+result count: 73712, elapsed = 9[ms]
+result count: 365596, elapsed = 67[ms]
+result count: 2279184, elapsed = 366[ms]
+result count: 14772512, elapsed = 2155[ms]
+result count: 95815104, elapsed = 18434[ms]
+```
