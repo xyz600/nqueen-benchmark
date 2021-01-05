@@ -11,95 +11,31 @@ compare gpu & cpu n-queen performance
 
 ## CPU implementation
 
-### ver1
+* ver1
+  * 単純な実装  
+* ver2
+  * Open MP による並列化  
+* ver3
+  * 深さ2まで展開して、並列度を調整  
+* ver4
+  * 最内ループを SIMD 4並列
+* ver5
+  * 探索の初手重複除去  
+* ver6
+  * Somer's algorithm  
 
-単純な実装  
+## 結果[ms]
 
-結果(N = 8 to 15)
-
-```
-result count: 92, elapsed = 0[ms]
-result count: 352, elapsed = 0[ms]
-result count: 724, elapsed = 2[ms]
-result count: 2680, elapsed = 10[ms]
-result count: 14200, elapsed = 34[ms]
-result count: 73712, elapsed = 193[ms]
-result count: 365596, elapsed = 1162[ms]
-result count: 2279184, elapsed = 7451[ms]
-```
-
-### ver2
-
-Open MP による並列化  
-
-結果(N = 8 to 17)
-
-```
-result count: 92, elapsed = 13[ms]
-result count: 352, elapsed = 1[ms]
-result count: 724, elapsed = 2[ms]
-result count: 2680, elapsed = 1[ms]
-result count: 14200, elapsed = 3[ms]
-result count: 73712, elapsed = 19[ms]
-result count: 365596, elapsed = 119[ms]
-result count: 2279184, elapsed = 689[ms]
-result count: 14772512, elapsed = 4405[ms]
-result count: 95815104, elapsed = 29532[ms]
-```
-
-### ver3
-
-深さ2まで展開して、並列度を調整  
-
-結果(N = 8 to 17)
-
-```
-result count: 92, elapsed = 8[ms]
-result count: 352, elapsed = 0[ms]
-result count: 724, elapsed = 0[ms]
-result count: 2680, elapsed = 0[ms]
-result count: 14200, elapsed = 4[ms]
-result count: 73712, elapsed = 21[ms]
-result count: 365596, elapsed = 80[ms]
-result count: 2279184, elapsed = 557[ms]
-result count: 14772512, elapsed = 3686[ms]
-result count: 95815104, elapsed = 24117[ms]
-```
-
-### ver4
-
-最内ループを SIMD 4並列
-
-結果(N = 8 to 17)
-
-```
-result count: 92, elapsed = 3[ms]
-result count: 352, elapsed = 13[ms]
-result count: 724, elapsed = 2[ms]
-result count: 2680, elapsed = 4[ms]
-result count: 14200, elapsed = 1[ms]
-result count: 73712, elapsed = 9[ms]
-result count: 365596, elapsed = 67[ms]
-result count: 2279184, elapsed = 366[ms]
-result count: 14772512, elapsed = 2155[ms]
-result count: 95815104, elapsed = 18434[ms]
-```
-
-### ver5
-
-探索の初手重複除去  
-
-結果(N = 8 to 17)
-
-```
-result count: 92, elapsed = 12[ms]
-result count: 352, elapsed = 8[ms]
-result count: 724, elapsed = 3[ms]
-result count: 2680, elapsed = 0[ms]
-result count: 14200, elapsed = 0[ms]
-result count: 73712, elapsed = 5[ms]
-result count: 365596, elapsed = 29[ms]
-result count: 2279184, elapsed = 202[ms]
-result count: 14772512, elapsed = 1039[ms]
-result count: 95815104, elapsed = 10245[ms]
-```
+| #pat      | N   | ver1 | ver2  | ver3  | ver4  | ver5  | ver6  |
+| --------- | --- | ---- | ----- | ----- | ----- | ----- | ----- |
+| 92        | 8   | 0    | 13    | 8     | 3     | 12    | 7     |
+| 352       | 9   | 0    | 1     | 0     | 13    | 8     | 9     |
+| 724       | 10  | 2    | 2     | 0     | 2     | 3     | 7     |
+| 2680      | 11  | 10   | 1     | 0     | 4     | 0     | 0     |
+| 14200     | 12  | 34   | 3     | 4     | 1     | 0     | 0     |
+| 73712     | 13  | 193  | 19    | 21    | 9     | 5     | 1     |
+| 365596    | 14  | 1162 | 119   | 80    | 67    | 29    | 7     |
+| 2279184   | 15  | 7451 | 689   | 557   | 366   | 202   | 55    |
+| 14772512  | 16  | -    | 4405  | 3686  | 2155  | 1039  | 302   |
+| 95815104  | 17  | -    | 29532 | 24117 | 18434 | 10245 | 2162  |
+| 666090624 | 18  | -    | -     | -     | -     | -     | 15324 |
