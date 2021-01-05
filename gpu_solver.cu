@@ -24,6 +24,12 @@ struct State
     }
 };
 
+struct PartialState
+{
+    std::uint8_t row;
+    std::uint8_t column;
+};
+
 template <std::uint32_t MaxSize>
 struct TaskList
 {
@@ -32,48 +38,73 @@ struct TaskList
     std::uint32_t task_size;
 };
 
-constexpr std::uint32_t MaxTaskSize = 1024 * 1024;
+constexpr std::uint32_t MaxTaskSize = 512 * 1024;
 
-template <int MaxSize>
-struct Stack
-{
-    State data[MaxSize];
-};
-
-__device__ std::uint32_t simulate(State& init_state, const std::uint32_t n)
+__device__ std::uint32_t simulate(State& state, const std::uint32_t n)
 {
     std::uint32_t counter = 0;
 
-    Stack<64> stack;
-    stack.data[0] = init_state;
-    State* ptr = &stack.data[1];
+    __shared__ std::uint8_t sh_stack[1024][24];
+    auto* ptr_column = &sh_stack[threadIdx.x][0];
+    *ptr_column = 0;
 
-    while (ptr != stack.data)
+    const int init_row = state.row;
+
+    // その column が探索終了した時に stack を戻す
+    auto rollback = [&]() {
+        if (init_row != state.row)
+        {
+            state.row--;
+            ptr_column--;
+
+            const std::uint32_t least_mask = 1u << *ptr_column;
+            const auto column_bit = least_mask;
+            const auto upper_left_bit = static_cast<std::uint64_t>(least_mask) << (n - 1 - state.row);
+            const auto upper_right_bit = static_cast<std::uint64_t>(least_mask) << state.row;
+
+            state.column_bitmap ^= column_bit;
+            state.upper_left_bitmap ^= upper_left_bit;
+            state.upper_right_bitmap ^= upper_right_bit;
+        }
+        (*ptr_column)++;
+    };
+
+    auto advance = [&](const std::uint32_t least_mask) {
+        const auto column_bit = least_mask;
+        const auto upper_left_bit = static_cast<std::uint64_t>(least_mask) << (n - 1 - state.row);
+        const auto upper_right_bit = static_cast<std::uint64_t>(least_mask) << state.row;
+        *ptr_column = 31 - __clz(least_mask);
+
+        state.column_bitmap ^= column_bit;
+        state.upper_left_bitmap ^= upper_left_bit;
+        state.upper_right_bitmap ^= upper_right_bit;
+
+        state.row++;
+        *(++ptr_column) = 0;
+    };
+
+    // スタックの最初で、column が終了に到達したら
+    while (!(state.row == init_row && *ptr_column == n))
     {
-        const auto state = *(--ptr);
-
         if (state.row == n)
         {
             counter++;
+            rollback();
         }
         else
         {
-            auto bitmask = ~((state.column_bitmap | (state.upper_left_bitmap >> (n - 1 - state.row)) | (state.upper_right_bitmap >> state.row))) & ((1ull << n) - 1ull);
-            while (bitmask > 0)
+            const std::uint32_t column_mask = ((1u << n) - 1u) - ((1u << *ptr_column) - 1);
+            const std::uint32_t bitmask = ~static_cast<std::uint32_t>((state.column_bitmap | (state.upper_left_bitmap >> (n - 1 - state.row)) | (state.upper_right_bitmap >> state.row))) & column_mask;
+
+            const auto least_mask = -bitmask & bitmask;
+
+            if (least_mask != 0)
             {
-                const auto least_mask = -bitmask & bitmask;
-
-                const auto column_bit = least_mask;
-                const auto upper_left_bit = least_mask << (n - 1 - state.row);
-                const auto upper_right_bit = least_mask << state.row;
-
-                // push next state to stack
-                ptr->column_bitmap = state.column_bitmap | column_bit;
-                ptr->upper_left_bitmap = state.upper_left_bitmap | upper_left_bit;
-                ptr->upper_right_bitmap = state.upper_right_bitmap | upper_right_bit;
-                ptr->row = state.row + 1;
-                ptr++;
-                bitmask -= least_mask;
+                advance(least_mask);
+            }
+            else
+            {
+                rollback();
             }
         }
     }
@@ -95,6 +126,11 @@ __global__ void solve(TaskList<MaxTaskSize>* que, std::uint32_t* counter, const 
     atomicAdd(counter, local_counter);
 }
 
+template <int MaxSize>
+struct Stack
+{
+    State data[MaxSize];
+};
 std::uint64_t gpu_solve(const std::size_t n)
 {
     constexpr std::size_t stream_size = 4;
@@ -114,7 +150,7 @@ std::uint64_t gpu_solve(const std::size_t n)
 
     int min_grid_size, block_size;
     CHECK_CUDA_ERROR(cudaOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size, solve));
-    min_grid_size = 16 / stream_size;
+    // min_grid_size = 16 / stream_size;
 
     // generate initial solution by cpu
     {
@@ -136,7 +172,7 @@ std::uint64_t gpu_solve(const std::size_t n)
         {
             const auto state = *(--ptr);
 
-            if (state.row == std::max<std::size_t>(0u, n - 8))
+            if (state.row == std::max<std::size_t>(0u, n - 9))
             {
                 host_task_list[thrown_index].data[host_task_list[thrown_index].task_size++] = state;
                 if (host_task_list[thrown_index].task_size == MaxTaskSize)
@@ -178,7 +214,6 @@ std::uint64_t gpu_solve(const std::size_t n)
             solve<<<min_grid_size, block_size, 0, stream_array[thrown_index]>>>(&dev_task_list[thrown_index], dev_counter.get(), n);
             counter++;
         }
-        std::cerr << counter << std::endl;
     }
 
     for (std::size_t i = 0; i < stream_size; i++)
@@ -193,7 +228,7 @@ std::uint64_t gpu_solve(const std::size_t n)
 
 int main()
 {
-    for (std::size_t n = 8; n <= 17; n++)
+    for (std::size_t n = 8; n <= 18; n++)
     {
         const auto start = std::chrono::system_clock::now();
         const auto count = gpu_solve(n);
