@@ -34,23 +34,23 @@ struct TaskList
 
 constexpr std::uint32_t MaxTaskSize = 1024 * 1024;
 
+template <int MaxSize>
 struct Stack
 {
-    State data[1024];
-    std::uint32_t top_index;
+    State data[MaxSize];
 };
 
 __device__ std::uint32_t simulate(State& init_state, const std::uint32_t n)
 {
     std::uint32_t counter = 0;
 
-    Stack stack;
-    stack.top_index = 1;
+    Stack<64> stack;
     stack.data[0] = init_state;
+    State* ptr = &stack.data[1];
 
-    while (stack.top_index > 0)
+    while (ptr != stack.data)
     {
-        const auto state = stack.data[--stack.top_index];
+        const auto state = *(--ptr);
 
         if (state.row == n)
         {
@@ -68,13 +68,11 @@ __device__ std::uint32_t simulate(State& init_state, const std::uint32_t n)
                 const auto upper_right_bit = least_mask << state.row;
 
                 // push next state to stack
-                stack.data[stack.top_index].column_bitmap = state.column_bitmap | column_bit;
-                stack.data[stack.top_index].upper_left_bitmap = state.upper_left_bitmap | upper_left_bit;
-                stack.data[stack.top_index].upper_right_bitmap = state.upper_right_bitmap | upper_right_bit;
-                stack.data[stack.top_index].row = state.row + 1;
-
-                stack.top_index++;
-
+                ptr->column_bitmap = state.column_bitmap | column_bit;
+                ptr->upper_left_bitmap = state.upper_left_bitmap | upper_left_bit;
+                ptr->upper_right_bitmap = state.upper_right_bitmap | upper_right_bit;
+                ptr->row = state.row + 1;
+                ptr++;
                 bitmask -= least_mask;
             }
         }
@@ -129,15 +127,14 @@ std::uint64_t gpu_solve(const std::size_t n)
         }
 
         // TODO: multi thread
-        Stack stack;
-        stack.top_index = 1;
+        Stack<128> stack;
         stack.data[0].clear();
         int counter = 0;
+        State* ptr = &stack.data[1];
 
-        while (stack.top_index > 0)
+        while (ptr != stack.data)
         {
-            assert(stack.top_index < 1024);
-            const auto state = stack.data[--stack.top_index];
+            const auto state = *(--ptr);
 
             if (state.row == std::max<std::size_t>(0u, n - 8))
             {
@@ -164,12 +161,12 @@ std::uint64_t gpu_solve(const std::size_t n)
                     const auto upper_right_bit = least_mask << state.row;
 
                     // push next state to stack
-                    stack.data[stack.top_index].column_bitmap = state.column_bitmap | column_bit;
-                    stack.data[stack.top_index].upper_left_bitmap = state.upper_left_bitmap | upper_left_bit;
-                    stack.data[stack.top_index].upper_right_bitmap = state.upper_right_bitmap | upper_right_bit;
-                    stack.data[stack.top_index].row = state.row + 1;
+                    ptr->column_bitmap = state.column_bitmap | column_bit;
+                    ptr->upper_left_bitmap = state.upper_left_bitmap | upper_left_bit;
+                    ptr->upper_right_bitmap = state.upper_right_bitmap | upper_right_bit;
+                    ptr->row = state.row + 1;
 
-                    stack.top_index++;
+                    ptr++;
                     bitmask -= least_mask;
                 }
             }
