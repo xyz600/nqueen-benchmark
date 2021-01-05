@@ -1,5 +1,6 @@
 #include "cuda_utility.cuh"
 
+#include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <cuda_runtime_api.h>
@@ -98,11 +99,14 @@ __global__ void solve(TaskList<MaxTaskSize>* que, std::uint32_t* counter, const 
 
 std::uint64_t gpu_solve(const std::size_t n)
 {
-    constexpr std::size_t stream_size = 1;
+    constexpr std::size_t stream_size = 4;
 
     const auto dev_task_list = cuda::make_unique<TaskList<MaxTaskSize>[]>(stream_size);
-    const auto dev_counter = cuda::make_unique_managed<std::uint32_t>();
-    *dev_counter = 0;
+    const auto dev_counter = cuda::make_unique<std::uint32_t>();
+    {
+        std::uint32_t tmp = 0;
+        CHECK_CUDA_ERROR(cudaMemcpy(dev_counter.get(), &tmp, sizeof(std::uint32_t), cudaMemcpyHostToDevice));
+    }
 
     std::array<cudaStream_t, stream_size> stream_array;
     for (std::size_t i = 0; i < stream_size; i++)
@@ -112,34 +116,40 @@ std::uint64_t gpu_solve(const std::size_t n)
 
     int min_grid_size, block_size;
     CHECK_CUDA_ERROR(cudaOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size, solve));
-    min_grid_size = 14;
+    min_grid_size = 16 / stream_size;
 
     // generate initial solution by cpu
     {
+        std::size_t thrown_index = 0;
+        auto host_task_list = std::make_unique<TaskList<MaxTaskSize>[]>(stream_size);
+        for (std::size_t i = 0; i < stream_size; i++)
+        {
+            host_task_list[i].index = 0;
+            host_task_list[i].task_size = 0;
+        }
+
         // TODO: multi thread
         Stack stack;
         stack.top_index = 1;
         stack.data[0].clear();
-
-        std::size_t thrown_index = 0;
-        auto host_task_list = std::make_unique<TaskList<MaxTaskSize>>();
-        host_task_list->index = 0;
-        host_task_list->task_size = 0;
+        int counter = 0;
 
         while (stack.top_index > 0)
         {
+            assert(stack.top_index < 1024);
             const auto state = stack.data[--stack.top_index];
 
             if (state.row == std::max<std::size_t>(0u, n - 8))
             {
-                host_task_list->data[host_task_list->task_size++] = state;
-                if (host_task_list->task_size == MaxTaskSize)
+                host_task_list[thrown_index].data[host_task_list[thrown_index].task_size++] = state;
+                if (host_task_list[thrown_index].task_size == MaxTaskSize)
                 {
-                    CHECK_CUDA_ERROR(cudaMemcpyAsync(&dev_task_list[thrown_index], host_task_list.get(), sizeof(TaskList<MaxTaskSize>), cudaMemcpyHostToDevice, stream_array[thrown_index]));
-                    solve<<<min_grid_size, block_size, 0, stream_array[thrown_index]>>>(dev_task_list.get(), dev_counter.get(), n);
+                    counter++;
+                    CHECK_CUDA_ERROR(cudaMemcpyAsync(&dev_task_list[thrown_index], &host_task_list[thrown_index], sizeof(TaskList<MaxTaskSize>), cudaMemcpyHostToDevice, stream_array[thrown_index]));
+                    solve<<<min_grid_size, block_size, 0, stream_array[thrown_index]>>>(&dev_task_list[thrown_index], dev_counter.get(), n);
 
                     thrown_index = (thrown_index + 1) % stream_size;
-                    host_task_list->task_size = 0;
+                    host_task_list[thrown_index].task_size = 0;
                 }
             }
             else
@@ -165,11 +175,13 @@ std::uint64_t gpu_solve(const std::size_t n)
             }
         }
 
-        if (host_task_list->task_size > 0)
+        if (host_task_list[thrown_index].task_size > 0)
         {
-            CHECK_CUDA_ERROR(cudaMemcpyAsync(&dev_task_list[thrown_index], host_task_list.get(), sizeof(TaskList<MaxTaskSize>), cudaMemcpyHostToDevice, stream_array[thrown_index]));
-            solve<<<min_grid_size, block_size, 0, stream_array[thrown_index]>>>(dev_task_list.get(), dev_counter.get(), n);
+            CHECK_CUDA_ERROR(cudaMemcpyAsync(&dev_task_list[thrown_index], &host_task_list[thrown_index], sizeof(TaskList<MaxTaskSize>), cudaMemcpyHostToDevice, stream_array[thrown_index]));
+            solve<<<min_grid_size, block_size, 0, stream_array[thrown_index]>>>(&dev_task_list[thrown_index], dev_counter.get(), n);
+            counter++;
         }
+        std::cerr << counter << std::endl;
     }
 
     for (std::size_t i = 0; i < stream_size; i++)
@@ -177,7 +189,9 @@ std::uint64_t gpu_solve(const std::size_t n)
         CHECK_CUDA_ERROR(cudaStreamSynchronize(stream_array[i]));
         CHECK_CUDA_ERROR(cudaStreamDestroy(stream_array[i]));
     }
-    return *dev_counter;
+    std::uint32_t tmp;
+    CHECK_CUDA_ERROR(cudaMemcpy(&tmp, dev_counter.get(), sizeof(std::uint32_t), cudaMemcpyDeviceToHost));
+    return tmp;
 }
 
 int main()
