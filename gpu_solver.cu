@@ -38,13 +38,13 @@ struct TaskList
     std::uint32_t task_size;
 };
 
-constexpr std::uint32_t MaxTaskSize = 512 * 1024;
+constexpr std::uint32_t MaxTaskSize = 1024 * 1024;
 
 __device__ std::uint32_t simulate(State& state, const std::uint32_t n)
 {
     std::uint32_t counter = 0;
 
-    __shared__ std::uint8_t sh_stack[1024][24];
+    __shared__ std::uint32_t sh_stack[1024][10];
     auto* ptr_column = &sh_stack[threadIdx.x][0];
     *ptr_column = 0;
 
@@ -150,7 +150,6 @@ std::uint64_t gpu_solve(const std::size_t n)
 
     int min_grid_size, block_size;
     CHECK_CUDA_ERROR(cudaOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size, solve));
-    // min_grid_size = 16 / stream_size;
 
     // generate initial solution by cpu
     {
@@ -172,7 +171,7 @@ std::uint64_t gpu_solve(const std::size_t n)
         {
             const auto state = *(--ptr);
 
-            if (state.row == std::max<std::size_t>(0u, n - 9))
+            if (state.row == std::max<std::size_t>(0u, n - 8))
             {
                 host_task_list[thrown_index].data[host_task_list[thrown_index].task_size++] = state;
                 if (host_task_list[thrown_index].task_size == MaxTaskSize)
