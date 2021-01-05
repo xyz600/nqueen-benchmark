@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <immintrin.h>
@@ -30,47 +31,27 @@ std::uint64_t solve(State& state, const std::size_t n)
         return 1ull;
     }
     std::uint64_t counter = 0;
-    const auto mult_offset = _mm256_setr_epi64x(1, 2, 4, 8);
 
-    const auto column_bitmap = _mm256_set1_epi64x(state.column_bitmap);
-    const auto upper_left_bitmap = _mm256_set1_epi64x(state.upper_left_bitmap);
-    const auto upper_right_bitmap = _mm256_set1_epi64x(state.upper_right_bitmap);
-    const auto zeros = _mm256_set1_epi64x(0);
-
-    for (std::size_t base_column = 0; base_column < n; base_column += 4)
+    auto bitmask = ~((state.column_bitmap | (state.upper_left_bitmap >> (n - 1 - state.row)) | (state.upper_right_bitmap >> state.row))) & ((1ull << n) - 1ull);
+    while (bitmask > 0)
     {
-        const auto column_bit = _mm256_slli_epi64(mult_offset, base_column);
-        const auto upper_left_bit = _mm256_slli_epi64(mult_offset, n - 1 - state.row + base_column);
-        const auto upper_right_bit = _mm256_slli_epi64(mult_offset, state.row + base_column);
+        const auto least_mask = -bitmask & bitmask;
 
-        const auto mask1 = _mm256_and_si256(column_bit, column_bitmap);
-        const auto mask2 = _mm256_and_si256(upper_left_bit, upper_left_bitmap);
-        const auto mask3 = _mm256_and_si256(upper_right_bit, upper_right_bitmap);
-        const auto all_mask = _mm256_cmpeq_epi64(zeros, _mm256_or_si256(_mm256_or_si256(mask1, mask2), mask3));
+        const auto column_bit = least_mask;
+        const auto upper_left_bit = least_mask << (n - 1 - state.row);
+        const auto upper_right_bit = least_mask << state.row;
 
-        std::uint32_t bitmask = _mm256_movemask_epi8(all_mask) & 0x80808080u;
-        while (bitmask > 0)
-        {
-            const auto least_mask = bitmask & ~(bitmask - 1);
-            const auto column = base_column + 3 - (__builtin_clz(least_mask) >> 3);
-            if (column < n)
-            {
-                const auto column_bit = 1ull << column;
-                const auto upper_left_bit = 1ull << (n - 1 - state.row + column);
-                const auto upper_right_bit = 1ull << (state.row + column);
+        state.column_bitmap ^= column_bit;
+        state.upper_left_bitmap ^= upper_left_bit;
+        state.upper_right_bitmap ^= upper_right_bit;
+        state.row++;
+        counter += solve(state, n);
+        state.column_bitmap ^= column_bit;
+        state.upper_left_bitmap ^= upper_left_bit;
+        state.upper_right_bitmap ^= upper_right_bit;
+        state.row--;
 
-                state.column_bitmap |= column_bit;
-                state.upper_left_bitmap |= upper_left_bit;
-                state.upper_right_bitmap |= upper_right_bit;
-                state.row++;
-                counter += solve(state, n);
-                state.column_bitmap &= ~column_bit;
-                state.upper_left_bitmap &= ~upper_left_bit;
-                state.upper_right_bitmap &= ~upper_right_bit;
-                state.row--;
-            }
-            bitmask -= least_mask;
-        }
+        bitmask -= least_mask;
     }
     return counter;
 }
@@ -123,7 +104,7 @@ std::uint64_t cpu_solve(const std::size_t n)
 
 int main()
 {
-    for (std::size_t n = 8; n <= 17; n++)
+    for (std::size_t n = 8; n <= 18; n++)
     {
         const auto start = std::chrono::system_clock::now();
         const auto count = cpu_solve(n);
