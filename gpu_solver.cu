@@ -63,7 +63,7 @@ constexpr std::uint32_t MaxTaskSize = 64 * 1024;
 constexpr std::uint32_t BlockSize = 96;
 __device__ std::uint32_t simulate(const State& init, const std::uint32_t n)
 {
-    std::uint32_t counter = 0;
+    std::uint64_t counter = 0;
 
     __shared__ State sh_stack[BlockSize][32];
 
@@ -101,9 +101,9 @@ __device__ std::uint32_t simulate(const State& init, const std::uint32_t n)
     return counter * init.rate;
 }
 
-__global__ void solve(TaskList<MaxTaskSize>* que, std::uint32_t* counter, const std::uint32_t n)
+__global__ void solve(TaskList<MaxTaskSize>* que, unsigned long long* counter, const std::uint32_t n)
 {
-    std::uint32_t local_counter = 0;
+    unsigned long long local_counter = 0;
 
     while (que->index < que->task_size)
     {
@@ -121,10 +121,10 @@ std::uint64_t gpu_solve(const std::size_t n)
     constexpr std::size_t stream_size = 4;
 
     const auto dev_task_list = cuda::make_unique<TaskList<MaxTaskSize>[]>(stream_size * 2);
-    const auto dev_counter = cuda::make_unique<std::uint32_t>();
+    const auto dev_counter = cuda::make_unique<unsigned long long>();
     {
-        std::uint32_t tmp = 0;
-        CHECK_CUDA_ERROR(cudaMemcpy(dev_counter.get(), &tmp, sizeof(std::uint32_t), cudaMemcpyHostToDevice));
+        std::uint64_t tmp = 0;
+        CHECK_CUDA_ERROR(cudaMemcpy(dev_counter.get(), &tmp, sizeof(unsigned long long), cudaMemcpyHostToDevice));
     }
 
     std::array<cudaStream_t, stream_size> stream_array;
@@ -238,14 +238,14 @@ std::uint64_t gpu_solve(const std::size_t n)
     {
         cudaStreamSynchronize(stream_array[i]);
     }
-    std::uint32_t tmp;
-    CHECK_CUDA_ERROR(cudaMemcpy(&tmp, dev_counter.get(), sizeof(std::uint32_t), cudaMemcpyDeviceToHost));
+    std::uint64_t tmp;
+    CHECK_CUDA_ERROR(cudaMemcpy(&tmp, dev_counter.get(), sizeof(std::uint64_t), cudaMemcpyDeviceToHost));
     return tmp;
 }
 
 int main()
 {
-    for (std::size_t n = 8; n <= 18; n++)
+    for (std::size_t n = 8; n <= 19; n++)
     {
         const auto start = std::chrono::system_clock::now();
         const auto count = gpu_solve(n);
