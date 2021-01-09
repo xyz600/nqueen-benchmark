@@ -114,7 +114,7 @@ __global__ void solve(TaskList<MaxTaskSize>* que, std::uint32_t* counter, const 
 
 std::uint64_t gpu_solve(const std::size_t n)
 {
-    constexpr std::size_t stream_size = 1;
+    constexpr std::size_t stream_size = 4;
 
     const auto dev_task_list = cuda::make_unique<TaskList<MaxTaskSize>[]>(stream_size * 2);
     const auto dev_counter = cuda::make_unique<std::uint32_t>();
@@ -146,27 +146,25 @@ std::uint64_t gpu_solve(const std::size_t n)
     }
 
     auto host_task_list = std::make_unique<TaskList<MaxTaskSize>[]>(stream_size * 2);
-    for (std::size_t i = 0; i < stream_size * 2; i++)
-    {
-        host_task_list[i].index = 0;
-        host_task_list[i].task_size = 0;
-    }
 
-    // #pragma omp parallel for num_threads(stream_size)
-    // for (std::size_t i = 0; i < c1c2.size(); i++)
+#pragma omp parallel for num_threads(stream_size)
+    for (std::size_t i = 0; i < c1c2.size(); i++)
     {
-        const int stream_idx = 0; // omp_get_thread_num();
+        const int stream_idx = omp_get_thread_num();
         int buffer_index = stream_idx * 2;
+        host_task_list[buffer_index].task_size = 0;
+        host_task_list[buffer_index].index = 0;
+
         const auto& stream = stream_array[stream_idx];
 
         {
             State init;
             init.clear();
-            // int column1, column2, rate;
-            // std::tie(column1, column2, rate) = c1c2[i];
+            int column1, column2, rate;
+            std::tie(column1, column2, rate) = c1c2[i];
 
-            // init.push_self(1u << column1);
-            // init.push_self(1u << column2);
+            init.push_self(1u << column1);
+            init.push_self(1u << column2);
 
             // TODO: multi thread
             State stack[128];
@@ -188,7 +186,7 @@ std::uint64_t gpu_solve(const std::size_t n)
             {
                 const auto state = *(--ptr_top);
 
-                if (state.row >= std::max<std::size_t>(0u, n - 8))
+                if (state.row >= std::max<std::size_t>(0u, n - 11))
                 {
                     host_task_list[buffer_index].data[host_task_list[buffer_index].task_size++] = state;
                     if (host_task_list[buffer_index].task_size == MaxTaskSize)
