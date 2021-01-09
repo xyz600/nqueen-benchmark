@@ -3,6 +3,7 @@
 #include <bitset>
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cuda_runtime_api.h>
 #include <iostream>
@@ -139,18 +140,13 @@ std::uint64_t gpu_solve(const std::size_t n)
     block_size = 96;
 
     std::vector<std::tuple<int, int, int>> c1c2;
-    const std::size_t col1_max = n;
-    for (std::size_t col1 = 0; col1 < col1_max; col1++)
+    for (int col1 = 0; col1 < n; col1++)
     {
-        for (std::size_t col2 = 0; col2 < n; col2++)
+        for (int col2 = 0; col2 < n; col2++)
         {
-            if (n % 2 == 0)
+            if (abs(col1 - col2) > 1)
             {
-                c1c2.emplace_back(col1, col2, 2);
-            }
-            else
-            {
-                c1c2.emplace_back(col1, col2, col1 == col1_max - 1 ? 1 : 2);
+                c1c2.emplace_back(col1, col2, 1);
             }
         }
     }
@@ -163,32 +159,36 @@ std::uint64_t gpu_solve(const std::size_t n)
     }
 
     // #pragma omp parallel for num_threads(stream_size)
-    //     for (std::size_t i = 0; i < c1c2.size(); i++)
+    // for (std::size_t i = 0; i < c1c2.size(); i++)
     {
         const int stream_idx = 0; // omp_get_thread_num();
         int buffer_index = stream_idx * 2;
         const auto& stream = stream_array[stream_idx];
 
-        // State state;
-        // state.clear();
-        // int column1, column2, rate;
-        // std::tie(column1, column2, rate) = c1c2[i];
-
-        // state.push_self(1u << column1);
-
-        // const auto column2_bit = 1u << column2;
-
-        // 制約を満たしていたら
-        // if (state.can_push(column2_bit))
         {
-            // state.push_self(column2_bit);
+            State state;
+            state.clear();
+            // int column1, column2, rate;
+            // std::tie(column1, column2, rate) = c1c2[i];
+
+            // state.push_self(1u << column1);
+            // state.push_self(1u << column2);
 
             // TODO: multi thread
             Stack<128> stack;
-            stack.data[0].clear(); // = state;
+            stack.data[0] = state;
             State* ptr_top = &stack.data[1];
 
             const std::uint32_t all = (1u << n) - 1;
+
+            auto subsolve = [&]() {
+                CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
+                CHECK_CUDA_ERROR(cudaMemcpyAsync(&dev_task_list[buffer_index], &host_task_list[buffer_index], sizeof(TaskList<MaxTaskSize>), cudaMemcpyHostToDevice, stream));
+                solve<<<min_grid_size, block_size, 0, stream>>>(&dev_task_list[buffer_index], dev_counter.get(), n);
+
+                buffer_index = (buffer_index % 2 == 0 ? buffer_index + 1 : buffer_index - 1);
+                host_task_list[buffer_index].task_size = 0;
+            };
 
             while (ptr_top != stack.data)
             {
@@ -199,12 +199,7 @@ std::uint64_t gpu_solve(const std::size_t n)
                     host_task_list[buffer_index].data[host_task_list[buffer_index].task_size++] = state;
                     if (host_task_list[buffer_index].task_size == MaxTaskSize)
                     {
-                        CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
-                        CHECK_CUDA_ERROR(cudaMemcpyAsync(&dev_task_list[buffer_index], &host_task_list[buffer_index], sizeof(TaskList<MaxTaskSize>), cudaMemcpyHostToDevice, stream));
-                        solve<<<min_grid_size, block_size, 0, stream>>>(&dev_task_list[buffer_index], dev_counter.get(), n);
-
-                        buffer_index = (buffer_index % 2 == 0 ? buffer_index + 1 : buffer_index - 1);
-                        host_task_list[buffer_index].task_size = 0;
+                        subsolve();
                     }
                 }
                 else
@@ -222,11 +217,14 @@ std::uint64_t gpu_solve(const std::size_t n)
 
             if (host_task_list[buffer_index].task_size > 0)
             {
-                CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
-                CHECK_CUDA_ERROR(cudaMemcpyAsync(&dev_task_list[buffer_index], &host_task_list[buffer_index], sizeof(TaskList<MaxTaskSize>), cudaMemcpyHostToDevice, stream));
-                solve<<<min_grid_size, block_size, 0, stream>>>(&dev_task_list[buffer_index], dev_counter.get(), n);
+                subsolve();
             }
         }
+    }
+
+    for (std::size_t i = 0; i < stream_size; i++)
+    {
+        cudaStreamSynchronize(stream_array[i]);
     }
 
     std::uint32_t tmp;
