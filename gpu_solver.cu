@@ -1,5 +1,6 @@
 #include "cuda_utility.cuh"
 
+#include <bitset>
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -12,8 +13,8 @@ struct State
 {
     std::uint32_t row;
     std::uint32_t column_bitmap;
-    std::uint64_t upper_left_bitmap;
-    std::uint64_t upper_right_bitmap;
+    std::uint32_t upper_left_bitmap;
+    std::uint32_t upper_right_bitmap;
 
     void clear()
     {
@@ -22,12 +23,6 @@ struct State
         upper_left_bitmap = 0;
         upper_right_bitmap = 0;
     }
-};
-
-struct PartialState
-{
-    std::uint8_t row;
-    std::uint8_t column;
 };
 
 template <std::uint32_t MaxSize>
@@ -40,71 +35,43 @@ struct TaskList
 
 constexpr std::uint32_t MaxTaskSize = 1024 * 1024;
 
-__device__ std::uint32_t simulate(State& state, const std::uint32_t n)
+__device__ std::uint32_t simulate(const State& init, const std::uint32_t n)
 {
     std::uint32_t counter = 0;
 
-    __shared__ std::uint32_t sh_stack[1024][10];
-    auto* ptr_column = &sh_stack[threadIdx.x][0];
-    *ptr_column = 0;
+    __shared__ State sh_stack[96][32];
 
-    const int init_row = state.row;
+    const auto* ptr_end = &sh_stack[threadIdx.x][0];
+    auto* ptr_top = &sh_stack[threadIdx.x][0];
+    *ptr_top = init;
+    ptr_top++;
 
-    // その column が探索終了した時に stack を戻す
-    auto rollback = [&]() {
-        if (init_row != state.row)
-        {
-            state.row--;
-            ptr_column--;
-
-            const std::uint32_t least_mask = 1u << *ptr_column;
-            const auto column_bit = least_mask;
-            const auto upper_left_bit = static_cast<std::uint64_t>(least_mask) << (n - 1 - state.row);
-            const auto upper_right_bit = static_cast<std::uint64_t>(least_mask) << state.row;
-
-            state.column_bitmap ^= column_bit;
-            state.upper_left_bitmap ^= upper_left_bit;
-            state.upper_right_bitmap ^= upper_right_bit;
-        }
-        (*ptr_column)++;
-    };
-
-    auto advance = [&](const std::uint32_t least_mask) {
-        const auto column_bit = least_mask;
-        const auto upper_left_bit = static_cast<std::uint64_t>(least_mask) << (n - 1 - state.row);
-        const auto upper_right_bit = static_cast<std::uint64_t>(least_mask) << state.row;
-        *ptr_column = 31 - __clz(least_mask);
-
-        state.column_bitmap ^= column_bit;
-        state.upper_left_bitmap ^= upper_left_bit;
-        state.upper_right_bitmap ^= upper_right_bit;
-
-        state.row++;
-        *(++ptr_column) = 0;
-    };
+    const std::uint32_t all = (1u << n) - 1;
 
     // スタックの最初で、column が終了に到達したら
-    while (!(state.row == init_row && *ptr_column == n))
+    while (ptr_top != ptr_end)
     {
+        const State state = *(--ptr_top);
+
         if (state.row == n)
         {
             counter++;
-            rollback();
         }
         else
         {
-            const std::uint32_t column_mask = ((1u << n) - 1u) - ((1u << *ptr_column) - 1);
-            const std::uint32_t bitmask = ~static_cast<std::uint32_t>((state.column_bitmap | (state.upper_left_bitmap >> (n - 1 - state.row)) | (state.upper_right_bitmap >> state.row))) & column_mask;
+            std::uint32_t bitmask = (~(state.column_bitmap | state.upper_left_bitmap | state.upper_right_bitmap)) & all;
 
-            const auto least_mask = -bitmask & bitmask;
+            while (bitmask > 0)
+            {
+                const auto least_mask = -bitmask & bitmask;
 
-            if (least_mask != 0)
-            {
-                advance(least_mask);
-            }
-            else
-            {
-                rollback();
+                ptr_top->row = state.row + 1;
+                ptr_top->column_bitmap = state.column_bitmap | least_mask;
+                ptr_top->upper_left_bitmap = (state.upper_left_bitmap | least_mask) >> 1;
+                ptr_top->upper_right_bitmap = (state.upper_right_bitmap | least_mask) << 1;
+                ptr_top++;
+
+                bitmask -= least_mask;
             }
         }
     }
@@ -131,6 +98,7 @@ struct Stack
 {
     State data[MaxSize];
 };
+
 std::uint64_t gpu_solve(const std::size_t n)
 {
     constexpr std::size_t stream_size = 4;
@@ -150,6 +118,7 @@ std::uint64_t gpu_solve(const std::size_t n)
 
     int min_grid_size, block_size;
     CHECK_CUDA_ERROR(cudaOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size, solve));
+    block_size = 96;
 
     // generate initial solution by cpu
     {
@@ -165,11 +134,13 @@ std::uint64_t gpu_solve(const std::size_t n)
         Stack<128> stack;
         stack.data[0].clear();
         int counter = 0;
-        State* ptr = &stack.data[1];
+        State* ptr_top = &stack.data[1];
 
-        while (ptr != stack.data)
+        const std::uint32_t all = (1u << n) - 1;
+
+        while (ptr_top != stack.data)
         {
-            const auto state = *(--ptr);
+            const auto state = *(--ptr_top);
 
             if (state.row == std::max<std::size_t>(0u, n - 8))
             {
@@ -186,22 +157,18 @@ std::uint64_t gpu_solve(const std::size_t n)
             }
             else
             {
-                auto bitmask = ~((state.column_bitmap | (state.upper_left_bitmap >> (n - 1 - state.row)) | (state.upper_right_bitmap >> state.row))) & ((1ull << n) - 1ull);
+                std::uint32_t bitmask = (~(state.column_bitmap | state.upper_left_bitmap | state.upper_right_bitmap)) & all;
+
                 while (bitmask > 0)
                 {
                     const auto least_mask = -bitmask & bitmask;
 
-                    const auto column_bit = least_mask;
-                    const auto upper_left_bit = least_mask << (n - 1 - state.row);
-                    const auto upper_right_bit = least_mask << state.row;
+                    ptr_top->row = state.row + 1;
+                    ptr_top->column_bitmap = state.column_bitmap | least_mask;
+                    ptr_top->upper_left_bitmap = (state.upper_left_bitmap | least_mask) >> 1;
+                    ptr_top->upper_right_bitmap = (state.upper_right_bitmap | least_mask) << 1;
+                    ptr_top++;
 
-                    // push next state to stack
-                    ptr->column_bitmap = state.column_bitmap | column_bit;
-                    ptr->upper_left_bitmap = state.upper_left_bitmap | upper_left_bit;
-                    ptr->upper_right_bitmap = state.upper_right_bitmap | upper_right_bit;
-                    ptr->row = state.row + 1;
-
-                    ptr++;
                     bitmask -= least_mask;
                 }
             }
