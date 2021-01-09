@@ -35,14 +35,14 @@ struct TaskList
 
 constexpr std::uint32_t MaxTaskSize = 1024 * 1024;
 
-__device__ std::uint32_t simulate(const State& init, const std::uint32_t n)
+__device__ std::uint32_t simulate(const State& init, const std::uint32_t n, const int idx)
 {
     std::uint32_t counter = 0;
 
-    __shared__ State sh_stack[96][32];
+    __shared__ State sh_stack[128][24];
 
-    const auto* ptr_end = &sh_stack[threadIdx.x][0];
-    auto* ptr_top = &sh_stack[threadIdx.x][0];
+    const auto* ptr_end = &sh_stack[idx][0];
+    auto* ptr_top = &sh_stack[idx][0];
     *ptr_top = init;
     ptr_top++;
 
@@ -80,6 +80,11 @@ __device__ std::uint32_t simulate(const State& init, const std::uint32_t n)
 
 __global__ void solve(TaskList<MaxTaskSize>* que, std::uint32_t* counter, const std::uint32_t n)
 {
+    if (threadIdx.x >= 4)
+    {
+        return;
+    }
+    const int idx = 4 * threadIdx.y + threadIdx.x;
     std::uint32_t local_counter = 0;
 
     while (que->index < que->task_size)
@@ -87,7 +92,7 @@ __global__ void solve(TaskList<MaxTaskSize>* que, std::uint32_t* counter, const 
         const auto pos = atomicAdd(&que->index, 1);
         if (pos < que->task_size)
         {
-            local_counter += simulate(que->data[pos], n);
+            local_counter += simulate(que->data[pos], n, idx);
         }
     }
     atomicAdd(counter, local_counter);
@@ -118,7 +123,9 @@ std::uint64_t gpu_solve(const std::size_t n)
 
     int min_grid_size, block_size;
     CHECK_CUDA_ERROR(cudaOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size, solve));
-    block_size = 96;
+    block_size = 1024;
+
+    dim3 block(32, block_size / 32);
 
     // generate initial solution by cpu
     {
@@ -149,7 +156,7 @@ std::uint64_t gpu_solve(const std::size_t n)
                 {
                     counter++;
                     CHECK_CUDA_ERROR(cudaMemcpyAsync(&dev_task_list[thrown_index], &host_task_list[thrown_index], sizeof(TaskList<MaxTaskSize>), cudaMemcpyHostToDevice, stream_array[thrown_index]));
-                    solve<<<min_grid_size, block_size, 0, stream_array[thrown_index]>>>(&dev_task_list[thrown_index], dev_counter.get(), n);
+                    solve<<<min_grid_size, block, 0, stream_array[thrown_index]>>>(&dev_task_list[thrown_index], dev_counter.get(), n);
 
                     thrown_index = (thrown_index + 1) % stream_size;
                     host_task_list[thrown_index].task_size = 0;
@@ -177,7 +184,7 @@ std::uint64_t gpu_solve(const std::size_t n)
         if (host_task_list[thrown_index].task_size > 0)
         {
             CHECK_CUDA_ERROR(cudaMemcpyAsync(&dev_task_list[thrown_index], &host_task_list[thrown_index], sizeof(TaskList<MaxTaskSize>), cudaMemcpyHostToDevice, stream_array[thrown_index]));
-            solve<<<min_grid_size, block_size, 0, stream_array[thrown_index]>>>(&dev_task_list[thrown_index], dev_counter.get(), n);
+            solve<<<min_grid_size, block, 0, stream_array[thrown_index]>>>(&dev_task_list[thrown_index], dev_counter.get(), n);
             counter++;
         }
     }
