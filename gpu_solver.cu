@@ -1,5 +1,6 @@
 #include "cuda_utility.cuh"
 
+#include <atomic>
 #include <bitset>
 #include <cassert>
 #include <chrono>
@@ -55,7 +56,7 @@ struct TaskList
     std::uint32_t task_size;
 };
 
-constexpr std::uint32_t MaxTaskSize = 1024 * 1024;
+constexpr std::uint32_t MaxTaskSize = 64 * 1024;
 
 __device__ std::uint32_t simulate(const State& init, const std::uint32_t n)
 {
@@ -132,6 +133,7 @@ std::uint64_t gpu_solve(const std::size_t n)
     int min_grid_size, block_size;
     CHECK_CUDA_ERROR(cudaOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size, solve));
     block_size = 96;
+    min_grid_size /= stream_size;
 
     std::vector<std::tuple<int, int, int>> c1c2;
     for (int col1 = 0; col1 < n; col1++)
@@ -147,21 +149,37 @@ std::uint64_t gpu_solve(const std::size_t n)
 
     auto host_task_list = std::make_unique<TaskList<MaxTaskSize>[]>(stream_size * 2);
 
-#pragma omp parallel for num_threads(stream_size)
-    for (std::size_t i = 0; i < c1c2.size(); i++)
+    std::atomic_int global_index(0);
+
+#pragma omp parallel num_threads(stream_size)
     {
         const int stream_idx = omp_get_thread_num();
         int buffer_index = stream_idx * 2;
         host_task_list[buffer_index].task_size = 0;
         host_task_list[buffer_index].index = 0;
-
         const auto& stream = stream_array[stream_idx];
 
+        auto subsolve = [&]() {
+            CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
+            CHECK_CUDA_ERROR(cudaMemcpyAsync(&dev_task_list[buffer_index], &host_task_list[buffer_index], sizeof(TaskList<MaxTaskSize>), cudaMemcpyHostToDevice, stream));
+            solve<<<min_grid_size, block_size, 0, stream>>>(&dev_task_list[buffer_index], dev_counter.get(), n);
+
+            buffer_index = (buffer_index % 2 == 0 ? buffer_index + 1 : buffer_index - 1);
+            host_task_list[buffer_index].task_size = 0;
+        };
+
+        while (true)
         {
+            const int idx = global_index.fetch_add(1);
+            if (c1c2.size() <= idx)
+            {
+                break;
+            }
+
             State init;
             init.clear();
             int column1, column2, rate;
-            std::tie(column1, column2, rate) = c1c2[i];
+            std::tie(column1, column2, rate) = c1c2[idx];
 
             init.push_self(1u << column1);
             init.push_self(1u << column2);
@@ -172,15 +190,6 @@ std::uint64_t gpu_solve(const std::size_t n)
             State* ptr_top = &stack[1];
 
             const std::uint32_t all = (1u << n) - 1;
-
-            auto subsolve = [&]() {
-                CHECK_CUDA_ERROR(cudaStreamSynchronize(stream));
-                CHECK_CUDA_ERROR(cudaMemcpyAsync(&dev_task_list[buffer_index], &host_task_list[buffer_index], sizeof(TaskList<MaxTaskSize>), cudaMemcpyHostToDevice, stream));
-                solve<<<min_grid_size, block_size, 0, stream>>>(&dev_task_list[buffer_index], dev_counter.get(), n);
-
-                buffer_index = (buffer_index % 2 == 0 ? buffer_index + 1 : buffer_index - 1);
-                host_task_list[buffer_index].task_size = 0;
-            };
 
             while (ptr_top != stack)
             {
@@ -206,11 +215,10 @@ std::uint64_t gpu_solve(const std::size_t n)
                     }
                 }
             }
-
-            if (host_task_list[buffer_index].task_size > 0)
-            {
-                subsolve();
-            }
+        }
+        if (host_task_list[buffer_index].task_size > 0)
+        {
+            subsolve();
         }
     }
 
