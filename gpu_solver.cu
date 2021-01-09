@@ -112,12 +112,6 @@ __global__ void solve(TaskList<MaxTaskSize>* que, std::uint32_t* counter, const 
     atomicAdd(counter, local_counter);
 }
 
-template <int MaxSize>
-struct Stack
-{
-    State data[MaxSize];
-};
-
 std::uint64_t gpu_solve(const std::size_t n)
 {
     constexpr std::size_t stream_size = 1;
@@ -166,18 +160,18 @@ std::uint64_t gpu_solve(const std::size_t n)
         const auto& stream = stream_array[stream_idx];
 
         {
-            State state;
-            state.clear();
+            State init;
+            init.clear();
             // int column1, column2, rate;
             // std::tie(column1, column2, rate) = c1c2[i];
 
-            // state.push_self(1u << column1);
-            // state.push_self(1u << column2);
+            // init.push_self(1u << column1);
+            // init.push_self(1u << column2);
 
             // TODO: multi thread
-            Stack<128> stack;
-            stack.data[0] = state;
-            State* ptr_top = &stack.data[1];
+            State stack[128];
+            stack[0] = init;
+            State* ptr_top = &stack[1];
 
             const std::uint32_t all = (1u << n) - 1;
 
@@ -190,7 +184,7 @@ std::uint64_t gpu_solve(const std::size_t n)
                 host_task_list[buffer_index].task_size = 0;
             };
 
-            while (ptr_top != stack.data)
+            while (ptr_top != stack)
             {
                 const auto state = *(--ptr_top);
 
@@ -226,7 +220,6 @@ std::uint64_t gpu_solve(const std::size_t n)
     {
         cudaStreamSynchronize(stream_array[i]);
     }
-
     std::uint32_t tmp;
     CHECK_CUDA_ERROR(cudaMemcpy(&tmp, dev_counter.get(), sizeof(std::uint32_t), cudaMemcpyDeviceToHost));
     return tmp;
