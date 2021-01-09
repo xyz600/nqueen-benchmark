@@ -7,7 +7,6 @@ compare gpu & cpu n-queen performance
 * 枝刈りありの backtrack
 * 1 step で 1行ずつ埋めていく
 * 縦方向と斜め2方向に関して、bitmap を使って利きを判定
-    * `n <= 32` を前提にするなら、多くても 64 bit の bitmap があれば十分
 
 ## CPU implementation
 
