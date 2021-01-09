@@ -14,7 +14,8 @@
 
 struct State
 {
-    std::uint32_t row;
+    std::uint16_t rate;
+    std::uint16_t row;
     std::uint32_t column_bitmap;
     std::uint32_t upper_left_bitmap;
     std::uint32_t upper_right_bitmap;
@@ -25,6 +26,7 @@ struct State
         column_bitmap = 0;
         upper_left_bitmap = 0;
         upper_right_bitmap = 0;
+        rate = 0;
     }
     __device__ __host__ void push(std::uint32_t column_bit, const State& prev)
     {
@@ -32,6 +34,7 @@ struct State
         column_bitmap = prev.column_bitmap | column_bit;
         upper_left_bitmap = (prev.upper_left_bitmap | column_bit) >> 1;
         upper_right_bitmap = (prev.upper_right_bitmap | column_bit) << 1;
+        rate = prev.rate;
     }
 
     __device__ __host__ void push_self(std::uint32_t column_bit)
@@ -57,12 +60,12 @@ struct TaskList
 };
 
 constexpr std::uint32_t MaxTaskSize = 64 * 1024;
-
+constexpr std::uint32_t BlockSize = 96;
 __device__ std::uint32_t simulate(const State& init, const std::uint32_t n)
 {
     std::uint32_t counter = 0;
 
-    __shared__ State sh_stack[96][32];
+    __shared__ State sh_stack[BlockSize][32];
 
     const auto* ptr_end = &sh_stack[threadIdx.x][0];
     auto* ptr_top = &sh_stack[threadIdx.x][0];
@@ -95,7 +98,7 @@ __device__ std::uint32_t simulate(const State& init, const std::uint32_t n)
             }
         }
     }
-    return counter;
+    return counter * init.rate;
 }
 
 __global__ void solve(TaskList<MaxTaskSize>* que, std::uint32_t* counter, const std::uint32_t n)
@@ -132,17 +135,25 @@ std::uint64_t gpu_solve(const std::size_t n)
 
     int min_grid_size, block_size;
     CHECK_CUDA_ERROR(cudaOccupancyMaxPotentialBlockSize(&min_grid_size, &block_size, solve));
-    block_size = 96;
+    block_size = BlockSize;
     min_grid_size /= stream_size;
 
     std::vector<std::tuple<int, int, int>> c1c2;
-    for (int col1 = 0; col1 < n; col1++)
+    const std::size_t col1_max = n / 2 + (n % 2 == 0 ? 0 : 1);
+    for (int col1 = 0; col1 < col1_max; col1++)
     {
         for (int col2 = 0; col2 < n; col2++)
         {
             if (abs(col1 - col2) > 1)
             {
-                c1c2.emplace_back(col1, col2, 1);
+                if (n % 2 == 0)
+                {
+                    c1c2.emplace_back(col1, col2, 2);
+                }
+                else
+                {
+                    c1c2.emplace_back(col1, col2, col1 == col1_max - 1 ? 1 : 2);
+                }
             }
         }
     }
@@ -181,6 +192,7 @@ std::uint64_t gpu_solve(const std::size_t n)
             int column1, column2, rate;
             std::tie(column1, column2, rate) = c1c2[idx];
 
+            init.rate = rate;
             init.push_self(1u << column1);
             init.push_self(1u << column2);
 
