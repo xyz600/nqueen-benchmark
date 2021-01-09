@@ -23,6 +23,26 @@ struct State
         upper_left_bitmap = 0;
         upper_right_bitmap = 0;
     }
+    __device__ __host__ void push(std::uint32_t column_bit, const State& prev)
+    {
+        row = prev.row + 1;
+        column_bitmap = prev.column_bitmap | column_bit;
+        upper_left_bitmap = (prev.upper_left_bitmap | column_bit) >> 1;
+        upper_right_bitmap = (prev.upper_right_bitmap | column_bit) << 1;
+    }
+
+    __device__ __host__ void push_self(std::uint32_t column_bit)
+    {
+        row++;
+        column_bitmap |= column_bit;
+        upper_left_bitmap = (upper_left_bitmap | column_bit) >> 1;
+        upper_right_bitmap = (upper_right_bitmap | column_bit) << 1;
+    }
+
+    __device__ __host__ bool can_push(std::uint32_t column_bit)
+    {
+        return ((column_bitmap | upper_left_bitmap | upper_right_bitmap) & column_bit) == 0;
+    }
 };
 
 template <std::uint32_t MaxSize>
@@ -65,10 +85,7 @@ __device__ std::uint32_t simulate(const State& init, const std::uint32_t n)
             {
                 const auto least_mask = -bitmask & bitmask;
 
-                ptr_top->row = state.row + 1;
-                ptr_top->column_bitmap = state.column_bitmap | least_mask;
-                ptr_top->upper_left_bitmap = (state.upper_left_bitmap | least_mask) >> 1;
-                ptr_top->upper_right_bitmap = (state.upper_right_bitmap | least_mask) << 1;
+                ptr_top->push(least_mask, state);
                 ptr_top++;
 
                 bitmask -= least_mask;
@@ -163,10 +180,7 @@ std::uint64_t gpu_solve(const std::size_t n)
                 {
                     const auto least_mask = -bitmask & bitmask;
 
-                    ptr_top->row = state.row + 1;
-                    ptr_top->column_bitmap = state.column_bitmap | least_mask;
-                    ptr_top->upper_left_bitmap = (state.upper_left_bitmap | least_mask) >> 1;
-                    ptr_top->upper_right_bitmap = (state.upper_right_bitmap | least_mask) << 1;
+                    ptr_top->push(least_mask, state);
                     ptr_top++;
 
                     bitmask -= least_mask;
